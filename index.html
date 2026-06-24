@@ -147,7 +147,7 @@
   .band-wind { font-size: 0.8rem; color: var(--snow); margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .band-arrow { display: inline-block; margin-right: 1px; color: var(--muted); }
   .band-snow { font-size: 0.8rem; color: var(--accent); width: 44px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-  .elev-note { margin-top: 12px; padding: 8px 10px; background: rgba(255,255,255,0.02); border-left: 2px solid var(--card-border); color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
+  .elev-note { margin-top: 12px; padding: 8px 10px; color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
 
   /* snowfall bars */
   .bars { display: flex; align-items: flex-end; gap: 8px; height: 140px; padding-top: 8px; }
@@ -1382,7 +1382,7 @@ async function loadElevationBands(loc, elevM) {
       </div>`;
     }).join("");
     // Add data source footnote
-    el.innerHTML += `<div class="elev-note"><small>Data from <strong>Open-Meteo</strong> (HRRR model, 3km) downscaled to each elevation — most accurate for the next 48 hours.</small></div>`;
+    el.innerHTML += `<div class="elev-note"><small><strong>Open-Meteo</strong> · HRRR model, 3km · Downscaled to each elevation — most accurate for the next 48 hours.</small></div>`;
   } catch (e) {
     el.innerHTML = `<div class="snotel-msg">Elevation forecast unavailable (${e.message}).</div>`;
     sl.textContent = "";
@@ -1434,7 +1434,7 @@ async function loadSnodasPoint(loc) {
         <div class="stile hero"><div class="sv">${depthIn != null ? depthIn.toFixed(depthIn >= 10 ? 0 : 1) : "—"}<span class="su">in</span></div><div class="sl">Snow Depth</div></div>
         <div class="stile hero"><div class="sv">${sweIn != null ? sweIn.toFixed(1) : "—"}<span class="su">in</span></div><div class="sl">Snow Water Equiv.</div></div>
       </div>
-      <div class="elev-note"><small>Modeled 1 km snow analysis at your exact point from <strong>NOAA SNODAS</strong> (National Snow Analysis) — assimilates SNOTEL, airborne &amp; satellite data. Updated daily · latest: ${dateTxt}.</small></div>`;
+      <div class="elev-note"><small><strong>NOAA SNODAS</strong> · National Snow Analysis, 1km · Assimilates SNOTEL, airborne &amp; satellite data · Updated daily · Latest: ${dateTxt}</small></div>`;
   } catch {
     card.classList.add("hidden"); // data not published yet, fetch failed, or no DecompressionStream
   }
