@@ -1,0 +1,38 @@
+name: Update SNODAS snowpack
+
+# Refresh the Colorado-cropped SNODAS snow depth / SWE snapshot once a day.
+# SNODAS publishes the previous day's analysis each morning UTC; the script walks
+# back up to 6 days, so a late post just means yesterday's data until it lands.
+on:
+  schedule:
+    - cron: "0 13 * * *"   # 13:00 UTC daily
+  workflow_dispatch: {}      # allow manual runs from the Actions tab
+
+permissions:
+  contents: write            # commit the refreshed data/ files
+
+concurrency:
+  group: snodas
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Colorado SNODAS crop
+        run: python3 tools/build_snodas.py
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snodas-co.json data/snodas-co-depth.bin.gz data/snodas-co-swe.bin.gz
+          if git diff --cached --quiet; then
+            echo "No SNODAS changes."
+          else
+            git commit -m "SNODAS update $(date -u +%Y-%m-%d)"
+            git push
+          fi

@@ -56,6 +56,14 @@
     background: var(--accent); color: #04243c; font-weight: 700; font-size: 1rem;
   }
   .search button:active { transform: scale(0.97); }
+  .search button.geo-btn {
+    padding: 0; width: 48px; display: flex; align-items: center; justify-content: center;
+    background: var(--card); color: var(--accent); border: 1px solid var(--card-border);
+  }
+  .search button.geo-btn:hover { border-color: var(--accent); }
+  .search button.geo-btn.locating { color: var(--muted); pointer-events: none; }
+  .search button.geo-btn.locating svg { animation: geo-spin 1s linear infinite; }
+  @keyframes geo-spin { to { transform: rotate(360deg); } }
 
   .suggestions {
     position: absolute; top: 56px; left: 0; right: 76px; z-index: 20;
@@ -139,6 +147,7 @@
   .band-wind { font-size: 0.8rem; color: var(--snow); margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .band-arrow { display: inline-block; margin-right: 1px; color: var(--muted); }
   .band-snow { font-size: 0.8rem; color: var(--accent); width: 44px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+  .elev-note { margin-top: 12px; padding: 8px 10px; background: rgba(255,255,255,0.02); border-left: 2px solid var(--card-border); color: var(--muted); font-size: 0.8rem; line-height: 1.4; }
 
   /* snowfall bars */
   .bars { display: flex; align-items: flex-end; gap: 8px; height: 140px; padding-top: 8px; }
@@ -156,12 +165,6 @@
   .total7 span { font-size: 0.85rem; color: var(--muted); font-weight: 500; }
 
   /* hourly */
-  .hourly { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; -webkit-overflow-scrolling: touch; }
-  .hour { flex: 0 0 auto; text-align: center; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 12px 10px; min-width: 64px; }
-  .hour .h { font-size: 0.75rem; color: var(--muted); }
-  .hour .i { font-size: 1.4rem; margin: 6px 0; }
-  .hour .t { font-weight: 700; }
-  .hour .s { font-size: 0.68rem; color: var(--accent); margin-top: 3px; min-height: 0.9em; }
 
   /* daily */
   .day { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-top: 1px solid rgba(255,255,255,0.06); cursor: pointer; }
@@ -309,6 +312,16 @@
 
   <div class="search">
     <input id="q" type="text" placeholder="Search a place — or 39.48, -106.04" autocomplete="off" autocapitalize="words">
+    <button id="geo" class="geo-btn" type="button" title="Use my current location" aria-label="Use my current location">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2" fill="currentColor"></circle>
+        <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+        <line x1="12" y1="1.5" x2="12" y2="5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></line>
+        <line x1="12" y1="19" x2="12" y2="22.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></line>
+        <line x1="1.5" y1="12" x2="5" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></line>
+        <line x1="19" y1="12" x2="22.5" y2="12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></line>
+      </svg>
+    </button>
     <button id="go">Go</button>
     <div id="suggest" class="suggestions hidden"></div>
   </div>
@@ -343,11 +356,6 @@
     </div>
 
     <div class="card">
-      <h2>Hourly — Next 24h</h2>
-      <div class="hourly" id="hourly"></div>
-    </div>
-
-    <div class="card">
       <h2>7-Day Forecast</h2>
       <div id="daily"></div>
     </div>
@@ -362,6 +370,11 @@
       <h2><svg class="flake"><use href="#flake"/></svg>Snowfall — Next 7 Days</h2>
       <div class="total7" id="total7f">—</div>
       <div class="bars" id="barsf"></div>
+    </div>
+
+    <div class="card" id="snodasCard">
+      <h2><svg class="flake"><use href="#flake"/></svg>Snowpack on the Ground <span class="h2-tag">SNODAS</span></h2>
+      <div id="snodasBody"><div class="snotel-msg">Loading snowpack…</div></div>
     </div>
 
     <div class="card elev-card">
@@ -574,7 +587,43 @@ $("q").addEventListener("keydown", e => {
   } else if (e.key === "Escape") hideSuggest();
 });
 $("go").addEventListener("click", doSearch);
+$("geo").addEventListener("click", useMyLocation);
 document.addEventListener("click", e => { if (!e.target.closest(".search")) hideSuggest(); });
+
+// ---------- GPS / current location ----------
+async function reverseGeocode(lat, lon) {
+  try {
+    const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
+    const d = await r.json();
+    const name = d.locality || d.city || d.principalSubdivision || null;
+    return name || null;
+  } catch { return null; }
+}
+
+function useMyLocation() {
+  const btn = $("geo");
+  if (!navigator.geolocation) {
+    setStatus("Location isn't available on this device.");
+    return;
+  }
+  btn.classList.add("locating");
+  setStatus("Getting your location…");
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude, lon = pos.coords.longitude;
+    const name = await reverseGeocode(lat, lon);
+    btn.classList.remove("locating");
+    const loc = name
+      ? { name, lat, lon }
+      : coordLoc({ lat, lon });
+    $("q").value = loc.name;
+    loadWeather(loc);
+  }, err => {
+    btn.classList.remove("locating");
+    setStatus(err.code === err.PERMISSION_DENIED
+      ? "Location permission denied — search a place instead."
+      : "Couldn't get your location — try again or search a place.");
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+}
 
 function hideSuggest() { $("suggest").classList.add("hidden"); activeIdx = -1; }
 
@@ -706,6 +755,7 @@ async function loadWeather(loc) {
     const [nws, pastDays] = await Promise.all([fetchNWS(loc), fetchPastSnow(loc)]);
     render(loc, nws, pastDays);
     loadSnotel(loc); // async, non-blocking — populates the SNOTEL card when ready
+    loadSnodasPoint(loc); // async, non-blocking — gridded snowpack at the exact point
   } catch (e) {
     if (e.code === "NOT_US")
       setStatus(`No NWS forecast for ${loc.name}.<br><span style="font-size:0.82rem">The National Weather Service covers the United States only — try a US location.</span>`, true);
@@ -719,7 +769,7 @@ async function fetchJSON(url, tries = 2) {
   let last;
   for (let i = 0; i < tries; i++) {
     try {
-      const r = await fetch(url, { headers: { Accept: "application/geo+json" } });
+      const r = await fetch(url, { headers: { Accept: "application/geo+json" }, cache: "no-store" });
       if (r.ok) return r.json();
       if (r.status === 404) { const e = new Error("outside US"); e.code = "NOT_US"; throw e; }
       last = new Error("HTTP " + r.status);
@@ -733,18 +783,24 @@ async function fetchJSON(url, tries = 2) {
 async function fetchObservation(stationsUrl) {
   try {
     const sd = await fetchJSON(stationsUrl);
-    const ids = (sd.features || []).slice(0, 4).map(f => f.properties && f.properties.stationIdentifier).filter(Boolean);
-    for (const id of ids) {
+    // NWS returns stations ordered by distance (nearest first). Always use the NEAREST
+    // station that has a usable reading — deterministic, so the same place doesn't hop
+    // between stations. require_qc=false returns the raw latest ob (the QC'd one can lag an hour+).
+    const feats = (sd.features || []).slice(0, 5); // candidates, in distance order
+    const results = await Promise.all(feats.map(async f => {
+      const id = f.properties && f.properties.stationIdentifier;
+      if (!id) return null;
       try {
-        const o = await fetchJSON(`https://api.weather.gov/stations/${id}/observations/latest`);
+        const o = await fetchJSON(`https://api.weather.gov/stations/${id}/observations/latest?require_qc=false`);
         const pr = o.properties;
-        if (pr && pr.temperature && pr.temperature.value != null && (Date.now() - new Date(pr.timestamp)) / 3600000 <= 4) {
-          const feat = sd.features.find(f => f.properties.stationIdentifier === id) || {};
-          const c = feat.geometry && feat.geometry.coordinates; // [lon, lat]
-          return { ...pr, stationName: feat.properties ? feat.properties.name : id, stationLat: c ? c[1] : null, stationLon: c ? c[0] : null };
-        }
-      } catch { /* try next station */ }
-    }
+        if (!pr || !pr.temperature || pr.temperature.value == null) return null;
+        if ((Date.now() - new Date(pr.timestamp)) / 3600000 > 4) return null; // skip stale
+        const c = f.geometry && f.geometry.coordinates; // [lon, lat]
+        return { ...pr, stationName: f.properties.name || id, stationLat: c ? c[1] : null, stationLon: c ? c[0] : null };
+      } catch { return null; }
+    }));
+    // first non-null in distance order = nearest station with data
+    return results.find(Boolean) || null;
   } catch { /* no observations available */ }
   return null;
 }
@@ -778,6 +834,8 @@ function durHours(s) {
 const dayKey = (d, tz) => d.toLocaleDateString("en-CA", { timeZone: tz }); // YYYY-MM-DD in the location's tz
 function addDayKey(key, n) { const d = new Date(key + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 const cToF = c => c == null ? null : c * 9 / 5 + 32;
+// NWS wind chill (°F, mph); valid for T ≤ 50°F and wind ≥ 3 mph.
+const windChillF = (t, v) => 35.74 + 0.6215 * t - 35.75 * Math.pow(v, 0.16) + 0.4275 * t * Math.pow(v, 0.16);
 // Value of a gridpoint time-series whose interval contains `when` (default: now).
 function gridValueAt(series, when = Date.now()) {
   if (!series || !series.values) return null;
@@ -899,21 +957,6 @@ function render(loc, nws, pastDays) {
   $("total7f").innerHTML = fcTotal.toFixed(1) + `" <span>forecast next 7 days</span>`;
   $("barsf").innerHTML = snowBars(fcDays);
 
-  // ---- hourly (next 24h) ----
-  let html = "";
-  for (let i = 0; i < 24 && i < nws.hourly.length; i++) {
-    const p = nws.hourly[i];
-    const hr = new Date(p.startTime).toLocaleTimeString("en", { hour: "numeric", timeZone: tz });
-    const pop = p.probabilityOfPrecipitation && p.probabilityOfPrecipitation.value;
-    html += `<div class="hour">
-      <div class="h">${i === 0 ? "Now" : hr}</div>
-      <div class="i">${iconSVG(nwsIcon(p.shortForecast, p.isDaytime))}</div>
-      <div class="t">${Math.round(p.temperature)}°</div>
-      <div class="s">${pop >= 20 ? "💧" + pop + "%" : ""}</div>
-    </div>`;
-  }
-  $("hourly").innerHTML = html;
-
   // ---- 7-day forecast (pair NWS day/night periods into calendar days) ----
   const byDay = {};
   for (const p of nws.daily) {
@@ -944,6 +987,17 @@ function render(loc, nws, pastDays) {
     </div>`;
   });
   $("daily").innerHTML = dhtml;
+
+  // open Today's row by default so its temp + precip graph shows without a tap
+  const firstRow = $("daily").querySelector(".day");
+  if (firstRow) {
+    const detail = firstRow.parentElement.querySelector(".day-detail");
+    if (detail) {
+      detail.innerHTML = dayHoursHTML(nws, firstRow.dataset.date);
+      detail.removeAttribute("hidden");
+      firstRow.classList.add("open");
+    }
+  }
 
   updateMapSearch(loc);
   updateMapObs(nws.obs);
@@ -1044,7 +1098,7 @@ function initDailyExpand() {
 // ====================== SNOTEL (USDA NRCS AWDB) ======================
 const SNOTEL_API = "https://wcc.sc.egov.usda.gov/awdbRestApi/services/v1";
 const SNOTEL_NETWORKS = ["SNTL", "SNTLT"]; // SNOTEL + SNOTEL-Lite
-const SNOTEL_CACHE_KEY = "snotelStations_v1";
+const SNOTEL_CACHE_KEY = "snotelStations_v2"; // v2: includes dataTimeZone
 const SNOTEL_CACHE_DAYS = 30;
 
 // Pretty units for the stored unit codes SNOTEL uses.
@@ -1107,6 +1161,18 @@ function haversineMiles(la1, lo1, la2, lo2) {
   const x = Math.sin(dLa / 2) ** 2 + Math.cos(la1 * t) * Math.cos(la2 * t) * Math.sin(dLo / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
 }
+// SNOTEL stamps readings in a fixed standard-time offset (dataTimeZone, e.g. -8 = PST),
+// NOT the local clock — so "14:00" must be read at that offset or it looks hours stale.
+function snotelDate(str, tzOffset) {
+  if (!str) return null;
+  let iso = str.replace(" ", "T");
+  if (!/T\d{2}:\d{2}:\d{2}/.test(iso)) iso += ":00"; // ensure seconds
+  if (tzOffset == null) return new Date(iso); // unknown offset → parse as local
+  const sign = tzOffset < 0 ? "-" : "+", ah = Math.abs(tzOffset);
+  const hh = String(Math.floor(ah)).padStart(2, "0");
+  const mm = String(Math.round((ah % 1) * 60)).padStart(2, "0");
+  return new Date(`${iso}${sign}${hh}:${mm}`);
+}
 const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
 const bearingToCompass = deg => COMPASS[Math.round(deg / 22.5) % 16];
 
@@ -1124,7 +1190,7 @@ async function getSnotelStations() {
     const all = await r.json();
     const stations = all
       .filter(s => SNOTEL_NETWORKS.includes((s.stationTriplet || "").split(":")[2]) && s.latitude != null && s.longitude != null)
-      .map(s => ({ t: s.stationTriplet, n: s.name, lat: s.latitude, lon: s.longitude, el: s.elevation }));
+      .map(s => ({ t: s.stationTriplet, n: s.name, lat: s.latitude, lon: s.longitude, el: s.elevation, tz: s.dataTimeZone }));
     try { localStorage.setItem(SNOTEL_CACHE_KEY, JSON.stringify({ t: Date.now(), s: stations })); } catch {}
     return stations;
   })();
@@ -1199,7 +1265,7 @@ function renderSnotel(station, distMi, latest) {
     for (const f of ["daily", "hourly"]) if (rec[f] && rec[f].date > newest) newest = rec[f].date;
 
   const elevTxt = station.el != null ? `<b class="alt">${Math.round(station.el).toLocaleString()} ft</b>` : "";
-  const asOf = newest ? new Date(newest.replace(" ", "T")).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+  const asOf = newest ? snotelDate(newest, station.tz).toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
   const coords = `${station.lat.toFixed(5)}, ${station.lon.toFixed(5)}`; // decimal degrees — also valid search input
   $("snotelHead").innerHTML = `<div class="sname">${station.n}</div>
     <div class="smeta">${[elevTxt, `${distMi.toFixed(1)} mi away`, station.t].filter(Boolean).join(" · ")}</div>
@@ -1283,6 +1349,8 @@ async function loadElevationBands(loc, elevM) {
         hourly: "freezing_level_height", daily: "snowfall_sum,temperature_2m_max,temperature_2m_min",
         temperature_unit: "fahrenheit", wind_speed_unit: "mph", precipitation_unit: "inch",
         timezone: "auto", forecast_days: "3",
+        // HRRR (3km, terrain-aware) for the near term, seamlessly extended by GFS — best US mountain resolution.
+        models: "gfs_seamless",
       });
       return (await fetch(`https://api.open-meteo.com/v1/forecast?${u}`)).json();
     }));
@@ -1313,9 +1381,62 @@ async function loadElevationBands(loc, elevM) {
         <div class="band-snow">${snow3 >= 0.1 ? "❄️ " + snow3.toFixed(1) + '"' : "—"}</div>
       </div>`;
     }).join("");
+    // Add data source footnote
+    el.innerHTML += `<div class="elev-note"><small>Data from <strong>Open-Meteo</strong> (HRRR model, 3km) downscaled to each elevation — most accurate for the next 48 hours.</small></div>`;
   } catch (e) {
     el.innerHTML = `<div class="snotel-msg">Elevation forecast unavailable (${e.message}).</div>`;
     sl.textContent = "";
+  }
+}
+
+// ---------- SNODAS snowpack: 1km gridded snow analysis, cropped to Colorado, ----------
+// refreshed daily by a GitHub Action and fetched same-origin (see tools/build_snodas.py).
+let _snodasPromise = null;
+async function getSnodas() {
+  if (_snodasPromise) return _snodasPromise;
+  _snodasPromise = (async () => {
+    const meta = await (await fetch("./data/snodas-co.json", { cache: "no-store" })).json();
+    const load = async name => {
+      const res = await fetch("./data/" + name);
+      const buf = await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+      return new Int16Array(buf); // little-endian Int16, mm
+    };
+    const [depth, swe] = await Promise.all([load(meta.products.depth), load(meta.products.swe)]);
+    return { meta, depth, swe };
+  })();
+  return _snodasPromise;
+}
+function snodasSample(s, lat, lon) {
+  const m = s.meta;
+  const col = Math.floor((lon - m.west) / m.cellsize);
+  const row = Math.floor((m.north - lat) / m.cellsize);
+  if (col < 0 || col >= m.ncols || row < 0 || row >= m.nrows) return null; // outside the CO crop
+  const i = row * m.ncols + col;
+  const d = s.depth[i], w = s.swe[i];
+  return { depth: d === m.nodata ? null : d, swe: w === m.nodata ? null : w }; // mm, or null = no data
+}
+async function loadSnodasPoint(loc) {
+  const card = $("snodasCard"), body = $("snodasBody");
+  body.innerHTML = `<div class="snotel-msg"><span class="spin"></span>Loading snowpack…</div>`;
+  try {
+    const s = await getSnodas();
+    const v = snodasSample(s, loc.lat, loc.lon);
+    if (!v) { card.classList.add("hidden"); return; } // outside Colorado coverage — hide card
+    card.classList.remove("hidden");
+    const depthIn = v.depth != null ? v.depth / 25.4 : null;
+    const sweIn = v.swe != null ? v.swe / 25.4 : null;
+    if (depthIn == null && sweIn == null) {
+      body.innerHTML = `<div class="snotel-msg">No snowpack analysis at this point.</div>`;
+      return;
+    }
+    const dateTxt = new Date(s.meta.date + "T12:00:00Z").toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+    body.innerHTML = `<div class="sgrid">
+        <div class="stile hero"><div class="sv">${depthIn != null ? depthIn.toFixed(depthIn >= 10 ? 0 : 1) : "—"}<span class="su">in</span></div><div class="sl">Snow Depth</div></div>
+        <div class="stile hero"><div class="sv">${sweIn != null ? sweIn.toFixed(1) : "—"}<span class="su">in</span></div><div class="sl">Snow Water Equiv.</div></div>
+      </div>
+      <div class="elev-note"><small>Modeled 1 km snow analysis at your exact point from <strong>NOAA SNODAS</strong> (National Snow Analysis) — assimilates SNOTEL, airborne &amp; satellite data. Updated daily · latest: ${dateTxt}.</small></div>`;
+  } catch {
+    card.classList.add("hidden"); // data not published yet, fetch failed, or no DecompressionStream
   }
 }
 
@@ -1333,9 +1454,52 @@ async function loadSnotel(loc) {
     $("snotelBody").innerHTML = `<div class="snotel-msg"><span class="spin"></span>Reading ${best.n}…</div>`;
     const latest = await fetchStationLatest(best.t);
     renderSnotel(best, bestD, latest);
+    maybePromoteSnotel(best, bestD, latest);
   } catch (e) {
     $("snotelBody").innerHTML = `<div class="snotel-msg err">Couldn't load SNOTEL data (${e.message}).</div>`;
   }
+}
+
+// If the nearest SNOTEL station is closer to the searched point than the NWS
+// observation station (or there's no NWS obs at all), its live readings are the
+// closest real measurement — promote them into the current-conditions box.
+function maybePromoteSnotel(station, distMi, latest) {
+  const nws = lastNWS, loc = currentLoc;
+  if (!nws || !loc) return;
+  const tobs = pickFeed(latest.TOBS, "any");
+  if (!tobs || tobs.value == null) return; // no current temp to show
+
+  // Skip an obviously stale reading so we don't overwrite live conditions.
+  const when = snotelDate(tobs.date, station.tz);
+  const ageH = when ? (Date.now() - when.getTime()) / 3600000 : Infinity;
+  if (!(ageH <= 4)) return;
+
+  const obs = nws.obs;
+  const obsDist = obs && obs.stationLat != null
+    ? haversineMiles(loc.lat, loc.lon, obs.stationLat, obs.stationLon)
+    : Infinity;
+  if (distMi >= obsDist) return; // NWS station is closer (or tied) — keep it
+
+  const tempF = tobs.value;
+  $("nowTemp").textContent = Math.round(tempF) + "°";
+
+  // wind + feels-like (wind chill when cold and breezy)
+  const wind = pickFeed(latest.WSPDV, "hourly");
+  const wdir = pickFeed(latest.WDIRV, "hourly");
+  if (wind && wind.value != null) {
+    const mph = Math.round(wind.value);
+    const dir = wdir && wdir.value != null && mph > 0 ? " " + bearingToCompass(wdir.value) : "";
+    $("mWind").textContent = mph === 0 ? "Calm" : `${mph} mph${dir}`;
+    $("mFeels").textContent = Math.round(tempF <= 50 && mph >= 3 ? windChillF(tempF, mph) : tempF) + "°";
+  } else {
+    $("mFeels").textContent = Math.round(tempF) + "°";
+  }
+
+  const rh = pickFeed(latest.RHUM, "hourly");
+  if (rh && rh.value != null) $("mHum").textContent = Math.round(rh.value) + "%";
+
+  const ot = when ? when.toLocaleString("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: nws.tz }) : "";
+  $("nowObs").textContent = `Observed · ${station.n} (SNOTEL) · ${distMi.toFixed(1)} mi${ot ? " · " + ot : ""}`;
 }
 
 // ====================== MAP (Leaflet, no API key) ======================
