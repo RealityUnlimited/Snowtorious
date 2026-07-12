@@ -726,65 +726,89 @@ function initDailyExpand() {
   });
 }
 
-// ====================== Compare favorites (next-7-day snowfall) ======================
-const CMP_KEY = "compare_v1";
-let cmpSel = (() => {
-  try { const a = JSON.parse(localStorage.getItem(CMP_KEY) || "null"); if (Array.isArray(a)) return a; } catch {}
-  return favorites.slice(0, 3).map(f => f.name);
-})();
-const _cmpCache = {}; // "lat,lon" -> promise of 7 daily snowfall values
+// ====================== Compare favorites (7-day snowfall, past or future) ======================
+// One factory builds both the "Next 7 Days" and "Last 7 Days" compare cards — same UI,
+// same caching pattern, different Open-Meteo query (forecast_days vs past_days).
+function makeCompare(opts) {
+  const { key, chipsId, bodyId, selDefault, emptyMsg, fetchDays, sourceNote } = opts;
+  let sel = (() => {
+    try { const a = JSON.parse(localStorage.getItem(key) || "null"); if (Array.isArray(a)) return a; } catch {}
+    return selDefault();
+  })();
+  const cache = {}; // "lat,lon" -> promise of 7 daily snowfall values
 
-function renderCompare() {
-  const chips = $("cmpChips");
-  if (!chips) return;
-  cmpSel = cmpSel.filter(n => favorites.some(f => f.name === n)); // drop deleted favorites
-  chips.innerHTML = favorites.map(f =>
-    `<button type="button" class="chip${cmpSel.includes(f.name) ? " cmp-on" : ""}" data-cmp="${esc(f.name)}">${esc(f.name)}</button>`
-  ).join("") || `<div class="snotel-msg">Add favorites above to compare them.</div>`;
-  chips.querySelectorAll("[data-cmp]").forEach(b => b.addEventListener("click", () => {
-    const n = b.dataset.cmp;
-    if (cmpSel.includes(n)) cmpSel = cmpSel.filter(x => x !== n);
-    else { cmpSel.push(n); if (cmpSel.length > 4) cmpSel.shift(); } // cap at 4 rows
-    try { localStorage.setItem(CMP_KEY, JSON.stringify(cmpSel)); } catch {}
-    renderCompare();
-  }));
-  loadCompare();
-}
-
-async function loadCompare() {
-  const body = $("cmpBody");
-  if (!body) return;
-  const sel = favorites.filter(f => cmpSel.includes(f.name));
-  if (!sel.length) {
-    body.innerHTML = `<div class="snotel-msg">Tap favorites above to compare their next-7-day snowfall.</div>`;
-    return;
+  function render() {
+    const chips = $(chipsId);
+    if (!chips) return;
+    sel = sel.filter(n => favorites.some(f => f.name === n)); // drop deleted favorites
+    chips.innerHTML = favorites.map(f =>
+      `<button type="button" class="chip${sel.includes(f.name) ? " cmp-on" : ""}" data-cmp="${esc(f.name)}">${esc(f.name)}</button>`
+    ).join("") || `<div class="snotel-msg">Add favorites above to compare them.</div>`;
+    chips.querySelectorAll("[data-cmp]").forEach(b => b.addEventListener("click", () => {
+      const n = b.dataset.cmp;
+      if (sel.includes(n)) sel = sel.filter(x => x !== n);
+      else { sel.push(n); if (sel.length > 4) sel.shift(); } // cap at 4 rows
+      try { localStorage.setItem(key, JSON.stringify(sel)); } catch {}
+      render();
+    }));
+    load();
   }
-  body.innerHTML = `<div class="snotel-msg"><span class="spin"></span>Comparing…</div>`;
-  const rows = await Promise.all(sel.map(async f => {
-    const key = `${f.lat},${f.lon}`;
-    if (!_cmpCache[key]) {
-      _cmpCache[key] = (async () => {
-        const u = new URLSearchParams({
-          latitude: f.lat, longitude: f.lon, daily: "snowfall_sum",
-          precipitation_unit: "inch", timezone: "auto", forecast_days: "7", models: "gfs_seamless",
-        });
-        const d = await (await fetch(`https://api.open-meteo.com/v1/forecast?${u}`)).json();
-        return d.daily.snowfall_sum.map(v => v || 0);
-      })().catch(() => null);
-    }
-    return { f, days: await _cmpCache[key] };
-  }));
-  const ok = rows.filter(r => r.days);
-  if (!ok.length) { body.innerHTML = `<div class="snotel-msg err">Comparison data unavailable right now.</div>`; return; }
-  const max = Math.max(0.5, ...ok.flatMap(r => r.days));
-  ok.sort((a, b) => b.days.reduce((s, x) => s + x, 0) - a.days.reduce((s, x) => s + x, 0));
-  body.innerHTML = ok.map(r => {
-    const total = r.days.reduce((s, x) => s + x, 0);
-    const bars = r.days.map(v => `<i class="${v < 0.05 ? "z" : ""}" style="height:${v < 0.05 ? 6 : Math.max(8, Math.round(v / max * 100))}%"></i>`).join("");
-    return `<div class="cmp-row"><div class="cmp-name">${esc(r.f.name)}</div><div class="cmp-bars">${bars}</div><div class="cmp-total">${total.toFixed(1)}″</div></div>`;
-  }).join("") +
-  `<div class="elev-note"><small><strong>Open-Meteo</strong> · HRRR/GFS · Daily snowfall for the next 7 days, tallest bar = ${max.toFixed(1)}″.</small></div>`;
+
+  async function load() {
+    const body = $(bodyId);
+    if (!body) return;
+    const picked = favorites.filter(f => sel.includes(f.name));
+    if (!picked.length) { body.innerHTML = `<div class="snotel-msg">${emptyMsg}</div>`; return; }
+    body.innerHTML = `<div class="snotel-msg"><span class="spin"></span>Comparing…</div>`;
+    const rows = await Promise.all(picked.map(async f => {
+      const ck = `${f.lat},${f.lon}`;
+      if (!cache[ck]) cache[ck] = fetchDays(f).catch(() => null);
+      return { f, days: await cache[ck] };
+    }));
+    const ok = rows.filter(r => r.days);
+    if (!ok.length) { body.innerHTML = `<div class="snotel-msg err">Comparison data unavailable right now.</div>`; return; }
+    const max = Math.max(0.5, ...ok.flatMap(r => r.days));
+    ok.sort((a, b) => b.days.reduce((s, x) => s + x, 0) - a.days.reduce((s, x) => s + x, 0));
+    body.innerHTML = ok.map(r => {
+      const total = r.days.reduce((s, x) => s + x, 0);
+      const bars = r.days.map(v => `<i class="${v < 0.05 ? "z" : ""}" style="height:${v < 0.05 ? 6 : Math.max(8, Math.round(v / max * 100))}%"></i>`).join("");
+      return `<div class="cmp-row"><div class="cmp-name">${esc(r.f.name)}</div><div class="cmp-bars">${bars}</div><div class="cmp-total">${total.toFixed(1)}″</div></div>`;
+    }).join("") +
+    `<div class="elev-note"><small>${sourceNote} tallest bar = ${max.toFixed(1)}″.</small></div>`;
+  }
+
+  return { render };
 }
+
+const cmpFuture = makeCompare({
+  key: "compare_v1", chipsId: "cmpChips", bodyId: "cmpBody",
+  selDefault: () => favorites.slice(0, 3).map(f => f.name),
+  emptyMsg: "Tap favorites above to compare their next-7-day snowfall.",
+  sourceNote: "<strong>Open-Meteo</strong> · HRRR/GFS · Daily snowfall for the next 7 days,",
+  fetchDays: async f => {
+    const u = new URLSearchParams({
+      latitude: f.lat, longitude: f.lon, daily: "snowfall_sum",
+      precipitation_unit: "inch", timezone: "auto", forecast_days: "7", models: "gfs_seamless",
+    });
+    const d = await (await fetch(`https://api.open-meteo.com/v1/forecast?${u}`)).json();
+    return d.daily.snowfall_sum.map(v => v || 0);
+  },
+});
+const cmpPast = makeCompare({
+  key: "comparePast_v1", chipsId: "cmpPastChips", bodyId: "cmpPastBody",
+  selDefault: () => favorites.slice(0, 3).map(f => f.name),
+  emptyMsg: "Tap favorites above to compare their last-7-day snowfall.",
+  sourceNote: "<strong>Open-Meteo</strong> · Observed daily snowfall for the past 7 days,",
+  fetchDays: async f => {
+    const u = new URLSearchParams({
+      latitude: f.lat, longitude: f.lon, daily: "snowfall_sum",
+      precipitation_unit: "inch", timezone: "auto", past_days: "7", forecast_days: "0",
+    });
+    const d = await (await fetch(`https://api.open-meteo.com/v1/forecast?${u}`)).json();
+    return d.daily.snowfall_sum.slice(0, 7).map(v => v || 0);
+  },
+});
+function renderCompare() { cmpFuture.render(); cmpPast.render(); }
 
 // ====================== Avalanche forecast (CAIC) ======================
 // Colorado Avalanche Information Center zone forecast for the searched point.
