@@ -1,7 +1,7 @@
 // Service worker for the Colorado Snow PWA.
 // Bump VERSION on each deploy so clients pick up the new app shell on next launch.
-const VERSION = "cosnow-v2";
-const SHELL = ["./", "./index.html", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
+const VERSION = "cosnow-v3";
+const SHELL = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.json", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
   // Precache the app shell, then activate immediately (don't wait for old tabs to close).

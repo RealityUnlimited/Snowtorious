@@ -19,7 +19,7 @@ Usage:
     python3 build_snodas.py --tar local.tar # build from an already-downloaded tar
     python3 build_snodas.py --date 20260501 # fetch a specific day
 """
-import argparse, datetime as dt, gzip, io, json, os, re, sys, tarfile, urllib.request
+import argparse, datetime as dt, gzip, io, json, os, re, shutil, sys, tarfile, urllib.request
 from array import array
 
 # Colorado bounding box, padded slightly to include border terrain.
@@ -147,6 +147,25 @@ def main():
             meta = c  # geometry identical across products
             sys.stderr.write(f"{label}: {c['ncols']}x{c['nrows']} -> {sz//1024} KB\n")
 
+    # Archive today's depth grid so the app can show weekly snowpack change,
+    # then prune archives older than 9 days (the app diffs against ~7 days back).
+    hist_dir = os.path.join(OUT_DIR, "history")
+    os.makedirs(hist_dir, exist_ok=True)
+    shutil.copyfile(os.path.join(OUT_DIR, "snodas-co-depth.bin.gz"),
+                    os.path.join(hist_dir, f"snodas-depth-{date_str}.bin.gz"))
+    today = dt.datetime.strptime(date_str, "%Y%m%d")
+    history = []
+    for name in sorted(os.listdir(hist_dir)):
+        m = re.match(r"snodas-depth-(\d{8})\.bin\.gz$", name)
+        if not m:
+            continue
+        age = (today - dt.datetime.strptime(m.group(1), "%Y%m%d")).days
+        if age > 9 or age < 0:
+            os.remove(os.path.join(hist_dir, name))
+        else:
+            d = m.group(1)
+            history.append(f"{d[:4]}-{d[4:6]}-{d[6:]}")
+
     iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
     info = {
         "date": iso,
@@ -155,6 +174,7 @@ def main():
         "west": round(meta["west"], 6), "north": round(meta["north"], 6),
         "cellsize": meta["cellsize"], "nodata": -9999, "units": "mm",
         "products": out_files,
+        "history": history,
     }
     with open(os.path.join(OUT_DIR, "snodas-co.json"), "w") as f:
         json.dump(info, f, indent=2)
