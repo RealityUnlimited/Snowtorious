@@ -332,6 +332,53 @@ async function fetchJSON(url, tries = 2) {
   }
   throw last;
 }
+// ---- Synoptic / MesoWest: primary source for current conditions ----
+// Aggregates 170k+ stations (NWS, RAWS, CDOT, ski areas, CWOP, SNOTEL) with real-time
+// QC — in the mountains the nearest station is often 1-3 mi away vs 15-30 mi for the
+// nearest NWS/METAR airport. Free open-access tier; NWS below remains the fallback.
+const SYNOPTIC_TOKEN = "7534825de37b41b48ec345ea27550e48";
+async function fetchSynopticObs(loc) {
+  try {
+    const u = new URLSearchParams({
+      radius: `${loc.lat.toFixed(4)},${loc.lon.toFixed(4)},20`, // nearest stations within 20 mi
+      limit: "10", within: "90",                                 // readings from the last 90 min only
+      vars: "air_temp,wind_speed,wind_direction,relative_humidity",
+      units: "metric", token: SYNOPTIC_TOKEN,
+    });
+    const d = await (await fetch(`https://api.synopticdata.com/v2/stations/latest?${u}`)).json();
+    const stations = d && d.STATION;
+    if (!Array.isArray(stations)) return null;
+    // Distance order, but professional networks (NWS, RAWS, CDOT, SNOTEL…) outrank
+    // citizen CWOP stations (MNET 65), which are often poorly sited and read hot.
+    const ranked = [...stations.filter(s => s.MNET_ID !== "65"), ...stations.filter(s => s.MNET_ID === "65")];
+    for (const s of ranked) { // first one with a temperature wins
+      const o = s.OBSERVATIONS || {};
+      const t = o.air_temp_value_1;
+      if (!t || t.value == null) continue;
+      const obs = {
+        temperature: { value: t.value },                              // °C, same shape NWS uses
+        timestamp: t.date_time,
+        stationName: s.NAME || s.STID,
+        stationLat: s.LATITUDE != null ? +s.LATITUDE : null,
+        stationLon: s.LONGITUDE != null ? +s.LONGITUDE : null,
+      };
+      const w = o.wind_speed_value_1;
+      if (w && w.value != null) obs.windSpeed = { value: w.value * 3.6 }; // m/s → km/h (NWS convention)
+      const wd = o.wind_direction_value_1;
+      if (wd && wd.value != null) obs.windDirection = { value: wd.value };
+      const rh = o.relative_humidity_value_1;
+      if (rh && rh.value != null) obs.relativeHumidity = { value: rh.value };
+      // wind chill (NWS formula works in °F/mph; convert back to °C for the shared render path)
+      if (obs.windSpeed) {
+        const tF = t.value * 9 / 5 + 32, mph = obs.windSpeed.value * 0.621371;
+        if (tF <= 50 && mph >= 3) obs.windChill = { value: (windChillF(tF, mph) - 32) * 5 / 9 };
+      }
+      return obs;
+    }
+  } catch { /* fall through to NWS */ }
+  return null;
+}
+
 // Latest live observation from the nearest station that has fresh data — this is what
 // weather.gov shows as "Current Conditions" (a real measurement, not the forecast).
 async function fetchObservation(stationsUrl) {
@@ -362,7 +409,9 @@ async function fetchNWS(loc) {
   const pts = await fetchJSON(`https://api.weather.gov/points/${loc.lat.toFixed(4)},${loc.lon.toFixed(4)}`);
   const p = pts.properties;
   const [fc, hr, gr, obs] = await Promise.all([
-    fetchJSON(p.forecast), fetchJSON(p.forecastHourly), fetchJSON(p.forecastGridData), fetchObservation(p.observationStations),
+    fetchJSON(p.forecast), fetchJSON(p.forecastHourly), fetchJSON(p.forecastGridData),
+    // Synoptic first (denser network, fresher readings); NWS stations as the fallback
+    fetchSynopticObs(loc).then(o => o || fetchObservation(p.observationStations)),
   ]);
   return { tz: p.timeZone || "America/Denver", daily: fc.properties.periods, hourly: hr.properties.periods, grid: gr.properties, obs };
 }
