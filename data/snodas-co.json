@@ -1,6 +1,6 @@
 {
-  "date": "2026-07-12",
-  "updated": "2026-07-12T16:15:15Z",
+  "date": "2026-07-13",
+  "updated": "2026-07-13T18:50:50Z",
   "ncols": 871,
   "nrows": 517,
   "west": -109.158333,
@@ -11,5 +11,8 @@
   "products": {
     "depth": "snodas-co-depth.bin.gz",
     "swe": "snodas-co-swe.bin.gz"
-  }
+  },
+  "history": [
+    "2026-07-13"
+  ]
 }
